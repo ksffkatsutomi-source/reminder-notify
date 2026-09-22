@@ -1,0 +1,19 @@
+name: reminder-notify
+on:
+  schedule:
+    # UTC指定（JST-9時間）。JST 6:00〜23:59 の間、10分ごとに実行
+    - cron: "*/10 21-23 * * *"
+    - cron: "*/10 0-14 * * *"
+  workflow_dispatch: {}
+jobs:
+  notify:
+    runs-on : ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install web-push@3
+      - run: node notify.js
+        env:
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
