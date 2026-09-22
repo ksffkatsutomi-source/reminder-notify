@@ -1,6 +1,7 @@
 // リマインダボード プッシュ通知送信役（GitHub Actionsで10分ごとに実行）
-// ・朝7時すぎ：きょうの予定まとめを1通
-// ・時刻つきタスク：その時刻を過ぎた最初の実行で1通（1タスク1回だけ）
+// 通知は「🚩期限(dl)」ベース（対応日dueでは通知しない・2026-09-22ユーザー指定）
+// ・朝7時すぎ：きょうが期限のタスクまとめを1通
+// ・期限がきょう＆時刻つき：その時刻を過ぎた最初の実行で1通（1タスク1回だけ）
 // ・こうき/あいか端末には🔒グループのタスクを送らない
 const webpush = require("web-push");
 
@@ -61,10 +62,10 @@ async function main() {
     groups[fv(f.id)] = { name: fv(f.name), lock: fv(f.lock) === "1" };
   });
 
-  // きょうが対応日のタスク
+  // きょうが期限(dl)のタスク
   const q = await (await fetch(`${BASE.replace(/\/documents$/, "")}/documents:runQuery`, {
     method: "POST", headers: H,
-    body: JSON.stringify({ structuredQuery: { from: [{ collectionId: "reminder_tasks" }], where: { fieldFilter: { field: { fieldPath: "due" }, op: "EQUAL", value: { stringValue: TODAY } } } } })
+    body: JSON.stringify({ structuredQuery: { from: [{ collectionId: "reminder_tasks" }], where: { fieldFilter: { field: { fieldPath: "dl" }, op: "EQUAL", value: { stringValue: TODAY } } } } })
   })).json();
   const tasks = (Array.isArray(q) ? q : []).filter(r => r.document).map(r => {
     const f = r.document.fields;
@@ -91,7 +92,7 @@ async function main() {
       const list = visibleFor(s.role);
       if (!list.length) continue;
       const names = list.slice(0, 6).map(t => "・" + t.title + (t.tm ? `（${t.tm}）` : "")).join("\n");
-      await send(s, { title: `📋 きょうの予定 ${list.length}件`, body: names + (list.length > 6 ? `\n…ほか${list.length - 6}件` : ""), tag: "digest-" + TODAY });
+      await send(s, { title: `🚩 きょうが期限 ${list.length}件`, body: names + (list.length > 6 ? `\n…ほか${list.length - 6}件` : ""), tag: "digest-" + TODAY });
     }
     await fetch(`${BASE}/reminder_push_meta/state?updateMask.fieldPaths=digestDate`, {
       method: "PATCH", headers: H, body: JSON.stringify({ fields: { digestDate: { stringValue: TODAY } } })
@@ -105,7 +106,7 @@ async function main() {
     const gname = (groups[t.g] && groups[t.g].name) || "";
     for (const s of subs) {
       if (s.role === "kid" && groups[t.g] && groups[t.g].lock) continue;
-      await send(s, { title: "⏰ " + t.title, body: `${gname}　きょう ${t.tm}`, tag: "tm-" + t.id });
+      await send(s, { title: "⏰ " + t.title, body: `${gname}　きょうが期限 ${t.tm}`, tag: "tm-" + t.id });
     }
     await fetch(`${t.path.replace(/^projects.*?\/documents/, BASE)}?updateMask.fieldPaths=ntf`, {
       method: "PATCH", headers: H, body: JSON.stringify({ fields: { ntf: { stringValue: TODAY } } })
