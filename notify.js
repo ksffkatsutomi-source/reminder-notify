@@ -114,11 +114,60 @@ async function main() {
     console.log("timed sent:", t.title);
   }
 
+  // ===== 家族カレンダー（events）の通知 =====
+  // ・時刻あり（tm）＝開始30分前に1回（events_ntf_log で重複防止）
+  // ・時刻なし＝当日の 7:00 と 17:00 にまとめ（reminder_push_meta/calstate の amDate/pmDate で1日1回ずつ）
+  const MEMBER = { papa:"パパ", mama:"ママ", koki:"こうき", aika:"あいか", hibiki:"ひびき", kanade:"かなで", kyotsu:"共通" };
+  const hmAdd = (hm, min) => {
+    const [h, m] = hm.split(":").map(Number);
+    const t = Math.max(0, h * 60 + m + min);
+    return `${pad(Math.floor(t / 60))}:${pad(t % 60)}`;
+  };
+  const evq = await (await fetch(`${BASE.replace(/\/documents$/, "")}/documents:runQuery`, {
+    method: "POST", headers: H,
+    body: JSON.stringify({ structuredQuery: { from: [{ collectionId: "events" }], where: { fieldFilter: { field: { fieldPath: "ds" }, op: "EQUAL", value: { stringValue: TODAY } } } } })
+  })).json();
+  const evs = (Array.isArray(evq) ? evq : []).filter(r => r.document).map(r => {
+    const f = r.document.fields;
+    return { id: r.document.name.split("/").pop(), t: fv(f.t), m: fv(f.m), tm: fv(f.tm) };
+  }).filter(e => e.t);
+  const evLabel = e => (MEMBER[e.m] ? MEMBER[e.m] + "　" : "") + e.t;
+
+  // 時刻あり＝30分前（実行が10分ごとなので tm-30〜tm の間の最初の実行で送る）
+  for (const e of evs) {
+    if (!e.tm) continue;
+    if (NOWHM < hmAdd(e.tm, -30) || NOWHM > e.tm) continue;
+    const logUrl = `${BASE}/events_ntf_log/${e.id}_${TODAY}`;
+    const logRes = await (await fetch(logUrl, { headers: H })).json();
+    if (logRes.fields) continue; // 送信済み
+    for (const s of subs) await send(s, { title: "📅 " + e.t, body: `${MEMBER[e.m] || ""}　きょう ${e.tm}（30分前のお知らせ）`, tag: "cal-" + e.id, url: "/" });
+    await fetch(`${logUrl}?updateMask.fieldPaths=at`, { method: "PATCH", headers: H, body: JSON.stringify({ fields: { at: { stringValue: TODAY + " " + NOWHM } } }) });
+    console.log("cal timed sent:", e.t);
+  }
+
+  // 時刻なし＝7:00（午前中のみ）と17:00（夕方以降）にまとめ
+  const calst = await (await fetch(`${BASE}/reminder_push_meta/calstate`, { headers: H })).json();
+  const amD = calst.fields ? fv(calst.fields.amDate) : "";
+  const pmD = calst.fields ? fv(calst.fields.pmDate) : "";
+  const slot = (NOWHM >= "07:00" && NOWHM < "12:00" && amD !== TODAY) ? "amDate"
+             : (NOWHM >= "17:00" && pmD !== TODAY) ? "pmDate" : "";
+  if (slot) {
+    const list = evs.filter(e => !e.tm);
+    if (list.length) {
+      const names = list.slice(0, 6).map(e => "・" + evLabel(e)).join("\n");
+      for (const s of subs) await send(s, { title: `📅 きょうの予定 ${list.length}件`, body: names + (list.length > 6 ? `\n…ほか${list.length - 6}件` : ""), tag: "caldigest-" + TODAY + slot, url: "/" });
+      console.log("cal digest sent:", slot, list.length);
+    }
+    await fetch(`${BASE}/reminder_push_meta/calstate?updateMask.fieldPaths=${slot}`, {
+      method: "PATCH", headers: H, body: JSON.stringify({ fields: { [slot]: { stringValue: TODAY } } })
+    });
+  }
+
   // 期限切れ購読の掃除
   for (const s of dead) {
     await fetch(`${BASE}/reminder_push/${s.id}`, { method: "DELETE", headers: H });
     console.log("removed dead sub:", s.id);
   }
-  console.log("done", TODAY, NOWHM, "subs:", subs.length, "tasks:", tasks.length);
+  console.log("done", TODAY, NOWHM, "subs:", subs.length, "tasks:", tasks.length, "events:", evs.length);
 }
 main().catch(e => { console.error(e); process.exit(1); });
