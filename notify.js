@@ -53,6 +53,8 @@ async function main() {
     sub: JSON.parse(fv(d.fields.sub)), role: fv(d.fields.role) || "admin"
   }));
   if (!subs.length) { console.log("購読端末なし"); return; }
+  // role:"cal"＝カレンダーだけ受け取る端末（ママ達）。🚩リマインダ系は送らない
+  const remSubs = subs.filter(s => s.role !== "cal");
 
   // グループ（🔒判定・名前）
   const meta = await (await fetch(`${BASE}/reminder_meta/board`, { headers: H })).json();
@@ -88,7 +90,7 @@ async function main() {
   const state = await (await fetch(`${BASE}/reminder_push_meta/state`, { headers: H })).json();
   const lastDigest = state.fields ? fv(state.fields.digestDate) : "";
   if (NOWHM >= "07:00" && lastDigest !== TODAY) {
-    for (const s of subs) {
+    for (const s of remSubs) {
       const list = visibleFor(s.role);
       if (!list.length) continue;
       const names = list.slice(0, 6).map(t => "・" + t.title + (t.tm ? `（${t.tm}）` : "")).join("\n");
@@ -104,7 +106,7 @@ async function main() {
   for (const t of tasks) {
     if (!t.tm || t.tm > NOWHM || t.ntf === TODAY) continue;
     const gname = (groups[t.g] && groups[t.g].name) || "";
-    for (const s of subs) {
+    for (const s of remSubs) {
       if (s.role === "kid" && groups[t.g] && groups[t.g].lock) continue;
       await send(s, { title: "⏰ " + t.title, body: `${gname}　きょうが期限 ${t.tm}`, tag: "tm-" + t.id });
     }
